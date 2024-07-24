@@ -1,0 +1,5 @@
+---
+app_name: test_app
+app_user: root
+app_dir: /var/www/sample_app
+DB_USER: test-user

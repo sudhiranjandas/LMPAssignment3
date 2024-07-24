@@ -1,0 +1,121 @@
+---
+- name: Deploy python application
+  hosts: web_servers
+  become: yes
+  vars_files:
+    - group_vars/all.yaml
+
+  tasks:
+    - name: Creating application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: copy application files
+      copy:
+        src: files/app.py
+        dest: "{{ app_dir }}/app.py"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+    
+    - name: copy application files
+      copy:
+        src: files/wsgi.py
+        dest: "{{ app_dir }}/wsgi.py"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: copy config files
+      template:
+        src: templates/config.j2
+        dest: "{{ app_dir }}/config.py"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        
+    - name: Copy flask service file
+      template:
+        src: templates/test_app.service.j2
+        dest: "/etc/systemd/system/test_app.service"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        
+    - name: Install python packages
+      package:
+        name:
+          - python3
+          - python3-pip
+          - python-pip
+          - python3-venv
+          - python-setuptools
+          - nginx
+          - gunicorn3
+        state: present
+
+    - name: Upgrade pip version
+      pip:
+        name: pip
+        extra_args: --upgrade
+        executable: pip3
+
+    - name: Create virtual environment
+      command: python3 -m venv {{ app_dir }}/venv
+      args:
+        creates: "{{ app_dir }}/venv"
+
+    - name: Install python requirements
+      pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_python: python3
+      when: '"requirements.txt" in lookup("fileglob", app_dir)'
+
+    - name: Install flask module
+      pip:
+        name: flask
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_python: python3
+        state: present
+        
+    - name: Install gunicorn module
+      pip:
+        name: gunicorn
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_python: python3
+        state: present
+        
+    - name: Install wheel module
+      pip:
+        name: wheel
+        virtualenv: "{{ app_dir }}/venv"
+        virtualenv_python: python3
+        state: present
+        
+    - name: Copy nginx cofig file
+      template:
+        src: templates/nginx.conf.j2
+        dest: "/etc/nginx/conf.d/flask.conf"
+
+    - name: Restart nginx service
+      systemd:
+        name: nginx
+        state: restarted
+       
+    - name: Start flask service
+      systemd:
+        name: test_app
+        state: started
+        daemon_reload: true
+      async: 3
+      poll: 1
+      register: flask_output
+
+    - name: Wait for the flask application starting
+      async_status:
+        jid: "{{ flask_output.ansible_job_id }}"
+      register: process_id
+      until: process_id.finished
+      retries: 10
+      delay: 3
+
